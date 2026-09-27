@@ -1,0 +1,14 @@
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>@yield('title','لوحة التحكم') | الزهراء</title>@vite(['resources/css/app.css','resources/js/app.js'])<style>:root{--brand:{{ $settings['primary_color'] ?? '#102332' }};--gold:{{ $settings['accent_color'] ?? '#c59d5f' }};--font:'{{ $settings['font'] ?? 'Cairo' }}',sans-serif}</style></head>
+<body class="admin-body">
+<header class="admin-topbar"><a class="admin-brand" href="{{ route('admin.dashboard') }}">@if(!empty($settings['logo']))<img class="admin-logo" src="{{ asset('storage/'.ltrim($settings['logo'], '/')) }}" alt="">@else<span class="brand-mark">ز</span>@endif<span>{{ $settings['company_name'] ?? 'الزهراء' }} <small class="d-block fw-normal opacity-75">لوحة إدارة المحتوى</small></span></a><div class="d-flex align-items-center gap-3"><a href="{{ route('home') }}" target="_blank" rel="noopener">عرض الموقع <i class="bi bi-box-arrow-up-left"></i></a><span class="d-none d-sm-inline">{{ auth()->user()->name }}</span><form method="post" action="{{ route('admin.logout') }}">@csrf<button class="btn btn-sm btn-outline-light" type="submit">خروج</button></form></div></header>
+<div class="admin-shell"><aside class="admin-sidebar" aria-label="القائمة الإدارية">
+    @php $links=[['admin.dashboard','لوحة التحكم','bi-speedometer2'],['admin.pages.index','الصفحات والأقسام','bi-layout-text-window'],['admin.catalog','الخدمات','bi-tools','service'],['admin.catalog','المشاريع','bi-buildings','project'],['admin.catalog','المعدات','bi-truck','equipment'],['admin.catalog','الفريق','bi-people','team'],['admin.media','مكتبة الوسائط','bi-images'],['admin.leads','طلبات المقايسة','bi-inbox'],['admin.settings','هوية وإعدادات الموقع','bi-palette'],['admin.activity','سجل التغييرات','bi-clock-history']]; @endphp
+    @foreach($links as $link)@php $url=$link[0]==='admin.catalog'?route('admin.catalog',$link[3]):route($link[0]); $active=$link[0]==='admin.catalog'?request()->routeIs('admin.catalog')&&request()->route('kind')===$link[3]:request()->routeIs($link[0].'*'); @endphp<a class="admin-side-link {{ $active?'active':'' }}" href="{{ $url }}"><i class="bi {{ $link[2] }}"></i>{{ $link[1] }}</a>@endforeach
+    @if(auth()->user()->role==='manager')<a class="admin-side-link {{ request()->routeIs('admin.users')?'active':'' }}" href="{{ route('admin.users') }}"><i class="bi bi-person-gear"></i>المستخدمون والصلاحيات</a>@endif
+</aside>
+<main class="admin-main">
+    @if(session('status'))<div class="form-success" role="status">{{ session('status') }}</div>@endif
+    @if($errors->any())<div class="form-errors" role="alert">@foreach($errors->all() as $error)<div>{{ $error }}</div>@endforeach</div>@endif
+    @yield('content')
+</main></div>
+</body></html>

@@ -1,0 +1,7 @@
+@extends('admin.layout')
+@section('title','الصفحات')
+@section('content')
+<div class="admin-title"><div><h1>الصفحات والأقسام</h1><p class="text-secondary mb-0">إدارة الصفحات وحالة النشر وترتيب أقسام كل صفحة.</p></div><a class="btn btn-dark" href="{{ route('admin.pages.create') }}"><i class="bi bi-plus-lg"></i> صفحة جديدة</a></div>
+<div class="alert-admin">كل قسم يمكن إخفاؤه أو نسخه أو حذفه وإعادة ترتيبه بالسحب أو الأسهم. النصوص تُعرض كنص آمن دون إدخال HTML.</div>
+<section class="admin-panel"><div class="table-wrap"><table class="admin-table"><thead><tr><th>الصفحة</th><th>الرابط</th><th>الأقسام</th><th>الحالة</th><th>آخر تعديل</th><th>إجراءات</th></tr></thead><tbody>@foreach($pages as $page)<tr><td><strong>{{ $page->title }}</strong></td><td dir="ltr">/{{ $page->slug==='home'?'':$page->slug }}</td><td>{{ count($page->sections ?? []) }}</td><td><span class="badge-status {{ $page->status==='published'?'live':'' }}">{{ $page->status==='published'?'منشورة':'مسودة' }}</span></td><td>{{ $page->updated_at->format('Y-m-d') }}</td><td><div class="admin-actions"><a class="btn btn-outline-dark btn-sm" href="{{ route('admin.pages.edit',$page->id) }}">تحرير</a><a class="btn btn-outline-dark btn-sm" href="{{ route('admin.pages.preview',$page->id) }}">معاينة</a>@if($page->slug!=='home')<form method="post" action="{{ route('admin.pages.delete',$page->id) }}" onsubmit="return confirm('حذف الصفحة؟')">@csrf @method('DELETE')<button class="btn btn-outline-danger btn-sm">حذف</button></form>@endif</div></td></tr>@endforeach</tbody></table></div></section>
+@endsection
