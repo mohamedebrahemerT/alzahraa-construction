@@ -1,4 +1,4 @@
-<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>دخول الإدارة | الزهراء</title>@vite(['resources/css/app.css','resources/js/app.js'])</head><body class="login-page"><main class="login-card">
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>دخول الإدارة | الزهراء</title><link rel="stylesheet" href="{{ asset('assets/site/site.css') }}"><script src="{{ asset('assets/site/site.js') }}" defer></script></head><body class="login-page"><main class="login-card">
     <a class="brand" href="{{ route('home') }}"><img class="brand-logo" src="{{ asset('images/brand/logo-mark.webp') }}" alt=""><span class="brand-copy"><strong>{{ $settings['company_name'] ?? 'الزهراء للمقاولات' }}</strong><small>إدارة الموقع</small></span></a>
     <h1>تسجيل الدخول إلى لوحة الإدارة</h1><p class="text-secondary">أدخل بيانات حسابك للمتابعة.</p>
     @if($errors->any())<div class="form-errors mb-3" role="alert">{{ $errors->first() }}</div>@endif

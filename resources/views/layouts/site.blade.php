@@ -13,7 +13,8 @@
     @if(!empty($settings['favicon']))<link rel="icon" href="{{ asset('storage/'.ltrim($settings['favicon'], '/')) }}">@endif
     
     
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+    <link rel="stylesheet" href="{{ asset('assets/site/site.css') }}">
+    <script src="{{ asset('assets/site/site.js') }}" defer></script>
     <style>:root{--brand:{{ $settings['primary_color'] ?? '#102332' }};--gold:{{ $settings['accent_color'] ?? '#c59d5f' }};--font:'{{ $settings['font'] ?? 'Cairo' }}',sans-serif}</style>
 </head>
 <body class="site-body">

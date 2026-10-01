@@ -88,6 +88,29 @@ class WebsiteAdministrationTest extends TestCase
         $this->assertFileDoesNotExist(public_path('robots.txt'));
     }
 
+    public function test_public_and_admin_pages_reference_published_static_assets(): void
+    {
+        $this->get('/')->assertOk()
+            ->assertSee('assets/site/site.css')
+            ->assertSee('assets/site/site.js');
+
+        $this->get('/admin/login')->assertOk()
+            ->assertSee('assets/site/site.css')
+            ->assertSee('assets/site/site.js');
+
+        $manager = User::create([
+            'name' => 'Static Asset Manager', 'email' => 'static-assets@example.test', 'password' => 'A-long-safe-test-password',
+            'role' => 'manager', 'is_active' => true,
+        ]);
+
+        $this->actingAs($manager)->get('/admin')->assertOk()
+            ->assertSee('assets/site/site.css')
+            ->assertSee('assets/site/site.js');
+
+        $this->assertFileExists(public_path('assets/site/site.css'));
+        $this->assertFileExists(public_path('assets/site/site.js'));
+    }
+
     public function test_web_responses_include_baseline_security_headers(): void
     {
         $this->get('/')
