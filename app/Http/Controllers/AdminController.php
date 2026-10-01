@@ -19,11 +19,14 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class AdminController extends Controller
 {
     private const KINDS = ['service', 'project', 'equipment', 'team'];
+
+    private const RESERVED_PAGE_SLUGS = ['admin', 'en', 'services', 'projects', 'contact', 'equipment', 'about', 'sitemap', 'robots', 'up'];
 
     public function loginForm(): View
     {
@@ -67,11 +70,16 @@ class AdminController extends Controller
 
     public function reorderPages(Request $request): JsonResponse
     {
-        $ids = $request->validate(['ids' => ['required', 'array', 'max:100'], 'ids.*' => ['integer']])['ids'];
-        foreach ($ids as $index => $id) {
-            ContentPage::whereKey($id)->update(['sort_order' => $index + 1]);
-        }
-        $this->audit('pages.reordered', 'page', null, 'إعادة ترتيب الصفحات.');
+        $ids = $request->validate([
+            'ids' => ['required', 'array', 'max:100'],
+            'ids.*' => ['required', 'integer', 'distinct', Rule::exists('content_pages', 'id')],
+        ])['ids'];
+        DB::transaction(function () use ($ids): void {
+            foreach ($ids as $index => $id) {
+                ContentPage::whereKey($id)->update(['sort_order' => $index + 1]);
+            }
+            $this->audit('pages.reordered', 'page', null, 'إعادة ترتيب الصفحات.');
+        });
 
         return response()->json(['message' => 'تم حفظ ترتيب الصفحات.']);
     }
@@ -107,7 +115,10 @@ class AdminController extends Controller
     {
         $data = $request->validate([
             'title' => ['required', 'string', 'max:180'],
-            'slug' => ['required', 'alpha_dash', 'max:180', Rule::unique('content_pages', 'slug')->ignore($page)],
+            'slug' => [
+                'required', 'alpha_dash', 'max:180', Rule::unique('content_pages', 'slug')->ignore($page),
+                Rule::notIn(self::RESERVED_PAGE_SLUGS),
+            ],
             'status' => ['required', Rule::in(['draft', 'published'])],
             'meta_title' => ['nullable', 'string', 'max:180'],
             'meta_description' => ['nullable', 'string', 'max:320'],
@@ -231,10 +242,16 @@ class AdminController extends Controller
     {
         $version = ContentRevision::where('model_type', 'page')->findOrFail($revision);
         $record = ContentPage::findOrFail($version->model_id);
-        $this->saveRevision('page', $record->id, $record->toArray());
         $snapshot = $version->version_data;
-        $record->fill(collect($snapshot)->only(['title', 'slug', 'status', 'meta_title', 'meta_description', 'share_image', 'sections', 'sort_order', 'translations'])->all())->save();
-        $this->audit('page.restored', 'page', $record->id, 'استعادة إصدار للصفحة: '.$record->title);
+        if (ContentPage::where('slug', $snapshot['slug'] ?? null)->where('id', '!=', $record->id)->exists()) {
+            return back()->withErrors(['revision' => 'لا يمكن استعادة الإصدار لأن عنوان الصفحة مستخدم لصفحة أخرى.']);
+        }
+
+        DB::transaction(function () use ($record, $snapshot): void {
+            $this->saveRevision('page', $record->id, $record->toArray());
+            $record->fill(collect($snapshot)->only(['title', 'slug', 'status', 'meta_title', 'meta_description', 'share_image', 'sections', 'sort_order', 'translations'])->all())->save();
+            $this->audit('page.restored', 'page', $record->id, 'استعادة إصدار للصفحة: '.$record->title);
+        });
 
         return $this->saved($request, 'تم استعادة الإصدار.');
     }
@@ -352,11 +369,16 @@ class AdminController extends Controller
     public function reorder(Request $request, string $kind): JsonResponse
     {
         $this->assertKind($kind);
-        $ids = $request->validate(['ids' => ['required', 'array', 'max:500'], 'ids.*' => ['integer']])['ids'];
-        foreach ($ids as $index => $id) {
-            ContentItem::where('kind', $kind)->whereKey($id)->update(['sort_order' => $index + 1]);
-        }
-        $this->audit('items.reordered', $kind, null, 'إعادة ترتيب عناصر '.$kind);
+        $ids = $request->validate([
+            'ids' => ['required', 'array', 'max:500'],
+            'ids.*' => ['required', 'integer', 'distinct', Rule::exists('content_items', 'id')->where('kind', $kind)],
+        ])['ids'];
+        DB::transaction(function () use ($ids, $kind): void {
+            foreach ($ids as $index => $id) {
+                ContentItem::where('kind', $kind)->whereKey($id)->update(['sort_order' => $index + 1]);
+            }
+            $this->audit('items.reordered', $kind, null, 'إعادة ترتيب عناصر '.$kind);
+        });
 
         return response()->json(['message' => 'تم حفظ الترتيب.']);
     }
@@ -518,18 +540,32 @@ class AdminController extends Controller
             'is_active' => ['nullable', 'boolean'],
         ]);
         $record = $user ? User::findOrFail($user) : new User;
-        if ($record->id === auth()->id() && ! $request->boolean('is_active')) {
+        $isActive = $request->boolean('is_active', ! $user);
+        if ($record->id === auth()->id() && ! $isActive) {
             return back()->withErrors(['is_active' => 'لا يمكن إيقاف حسابك أثناء استخدامه.']);
         }
-        $record->name = $data['name'];
-        $record->email = $data['email'];
-        $record->role = $data['role'];
-        $record->is_active = $request->boolean('is_active', ! $user);
-        if (! empty($data['password'])) {
-            $record->password = Hash::make($data['password']);
-        }
-        $record->save();
-        $this->audit($user ? 'user.updated' : 'user.created', 'user', $record->id, 'حفظ حساب: '.$record->email);
+        DB::transaction(function () use ($data, $isActive, $record, $user): void {
+            $activeManagers = User::where('role', 'manager')->where('is_active', true)->lockForUpdate()->get();
+            $removesActiveManager = $record->exists
+                && $record->role === 'manager'
+                && $record->is_active
+                && ($data['role'] !== 'manager' || ! $isActive);
+            if ($removesActiveManager && $activeManagers->where('id', '!=', $record->id)->isEmpty()) {
+                throw ValidationException::withMessages([
+                    'role' => 'يجب إبقاء حساب مدير نشط واحد على الأقل حتى لا تفقد الإدارة صلاحية التحكم بالموقع.',
+                ]);
+            }
+
+            $record->name = $data['name'];
+            $record->email = $data['email'];
+            $record->role = $data['role'];
+            $record->is_active = $isActive;
+            if (! empty($data['password'])) {
+                $record->password = Hash::make($data['password']);
+            }
+            $record->save();
+            $this->audit($user ? 'user.updated' : 'user.created', 'user', $record->id, 'حفظ حساب: '.$record->email);
+        });
 
         return $this->saved($request, 'تم حفظ الحساب.');
     }

@@ -75,6 +75,63 @@ class WebsiteAdministrationTest extends TestCase
             ->assertSee('الصفحة غير موجودة');
     }
 
+    public function test_public_pages_and_machine_readable_routes_are_available(): void
+    {
+        foreach (['/', '/about', '/services', '/projects', '/equipment', '/contact', '/en', '/en/about', '/sitemap.xml', '/robots.txt', '/admin/login'] as $path) {
+            $this->get($path)->assertOk();
+        }
+
+        $this->get('/robots.txt')
+            ->assertHeader('Content-Type', 'text/plain; charset=UTF-8')
+            ->assertSee('Disallow: /admin')
+            ->assertSee('Sitemap: '.url('/sitemap.xml'));
+        $this->assertFileDoesNotExist(public_path('robots.txt'));
+    }
+
+    public function test_web_responses_include_baseline_security_headers(): void
+    {
+        $this->get('/')
+            ->assertHeader('X-Content-Type-Options', 'nosniff')
+            ->assertHeader('X-Frame-Options', 'SAMEORIGIN')
+            ->assertHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+            ->assertHeader('Permissions-Policy', 'camera=(), geolocation=(), microphone=()');
+    }
+
+    public function test_guest_is_redirected_to_login_from_the_admin_dashboard(): void
+    {
+        $this->get(route('admin.dashboard'))->assertRedirect(route('login'));
+    }
+
+    public function test_active_manager_can_sign_in_to_the_admin_dashboard(): void
+    {
+        $manager = User::create([
+            'name' => 'Site Manager', 'email' => 'login-manager@example.test', 'password' => 'A-long-safe-test-password',
+            'role' => 'manager', 'is_active' => true,
+        ]);
+
+        $this->from(route('login'))->post(route('admin.login'), [
+            'email' => $manager->email,
+            'password' => 'A-long-safe-test-password',
+        ])->assertRedirect(route('admin.dashboard'));
+
+        $this->assertAuthenticatedAs($manager);
+    }
+
+    public function test_inactive_manager_cannot_sign_in(): void
+    {
+        $manager = User::create([
+            'name' => 'Inactive Manager', 'email' => 'inactive-manager@example.test', 'password' => 'A-long-safe-test-password',
+            'role' => 'manager', 'is_active' => false,
+        ]);
+
+        $this->from(route('login'))->post(route('admin.login'), [
+            'email' => $manager->email,
+            'password' => 'A-long-safe-test-password',
+        ])->assertRedirect(route('login'))->assertSessionHasErrors('email');
+
+        $this->assertGuest();
+    }
+
     public function test_quote_request_is_saved_before_success_is_shown(): void
     {
         $this->from('/contact')->post('/estimate', [
@@ -86,6 +143,16 @@ class WebsiteAdministrationTest extends TestCase
             'name' => 'عميل جديد', 'project_type' => 'villa', 'status' => 'new',
         ]);
         $this->assertSame(1, EstimateRequest::count());
+    }
+
+    public function test_quote_request_rejects_the_spam_honeypot_without_saving(): void
+    {
+        $this->from('/contact')->post('/estimate', [
+            'name' => 'Spam Submission', 'whatsapp' => '01012345678', 'project_type' => 'villa',
+            'area' => '250', 'message' => 'Please send me a project estimate.', 'company_website' => 'https://spam.example',
+        ])->assertRedirect('/contact')->assertSessionHasErrors('company_website');
+
+        $this->assertDatabaseMissing('estimate_requests', ['name' => 'Spam Submission']);
     }
 
     public function test_quote_request_notifies_the_company_when_mail_is_configured(): void
@@ -212,5 +279,105 @@ class WebsiteAdministrationTest extends TestCase
         $this->assertSame('#112233', SiteSetting::value('general')['primary_color']);
         $this->assertSame('اطلب تسعيرًا', SiteSetting::value('general')['header_cta_label']);
         $this->assertSame('Al Zahraa Testing', SiteSetting::value('general')['translations']['en']['company_name']);
+    }
+
+    public function test_page_cannot_claim_a_reserved_route_slug(): void
+    {
+        $manager = User::create([
+            'name' => 'Site Manager', 'email' => 'reserved-manager@example.test', 'password' => 'A-long-safe-test-password',
+            'role' => 'manager', 'is_active' => true,
+        ]);
+
+        $this->actingAs($manager)->post('/admin/pages', [
+            'title' => 'Reserved Page', 'slug' => 'services', 'status' => 'published', 'sections' => '[]',
+        ])->assertSessionHasErrors('slug');
+
+        $this->assertDatabaseMissing('content_pages', ['title' => 'Reserved Page']);
+    }
+
+    public function test_catalog_order_rejects_items_from_another_kind_without_reordering(): void
+    {
+        $manager = User::create([
+            'name' => 'Site Manager', 'email' => 'order-manager@example.test', 'password' => 'A-long-safe-test-password',
+            'role' => 'manager', 'is_active' => true,
+        ]);
+        $service = ContentItem::where('kind', 'service')->firstOrFail();
+        $project = ContentItem::where('kind', 'project')->firstOrFail();
+        $originalOrder = $service->sort_order;
+
+        $this->actingAs($manager)
+            ->postJson(route('admin.catalog.order', ['kind' => 'service']), ['ids' => [$service->id, $project->id]])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('ids.1');
+
+        $this->assertSame($originalOrder, $service->fresh()->sort_order);
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'items.reordered']);
+    }
+
+    public function test_page_revision_restore_refuses_an_occupied_slug_without_side_effects(): void
+    {
+        $manager = User::create([
+            'name' => 'Site Manager', 'email' => 'restore-manager@example.test', 'password' => 'A-long-safe-test-password',
+            'role' => 'manager', 'is_active' => true,
+        ]);
+        $page = ContentPage::where('slug', 'about')->firstOrFail();
+        $occupiedPage = ContentPage::where('slug', 'contact')->firstOrFail();
+        $revision = ContentRevision::create([
+            'model_type' => 'page',
+            'model_id' => $page->id,
+            'version_data' => array_merge($page->toArray(), ['slug' => $occupiedPage->slug, 'title' => 'Older About Page']),
+            'created_by' => $manager->id,
+        ]);
+
+        $this->actingAs($manager)
+            ->from('/admin/pages/'.$page->id.'/edit')
+            ->post(route('admin.revisions.restore', ['revision' => $revision->id]))
+            ->assertRedirect('/admin/pages/'.$page->id.'/edit')
+            ->assertSessionHasErrors('revision');
+
+        $this->assertSame('about', $page->fresh()->slug);
+        $this->assertSame(1, ContentRevision::where('model_type', 'page')->where('model_id', $page->id)->count());
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'page.restored', 'subject_id' => $page->id]);
+    }
+
+    public function test_page_revision_restore_saves_revision_and_audit_together(): void
+    {
+        $manager = User::create([
+            'name' => 'Site Manager', 'email' => 'restore-success-manager@example.test', 'password' => 'A-long-safe-test-password',
+            'role' => 'manager', 'is_active' => true,
+        ]);
+        $page = ContentPage::where('slug', 'about')->firstOrFail();
+        $revision = ContentRevision::create([
+            'model_type' => 'page',
+            'model_id' => $page->id,
+            'version_data' => array_merge($page->toArray(), ['slug' => 'about-previous', 'title' => 'Older About Page']),
+            'created_by' => $manager->id,
+        ]);
+
+        $this->actingAs($manager)
+            ->post(route('admin.revisions.restore', ['revision' => $revision->id]))
+            ->assertSessionHas('status', 'تم استعادة الإصدار.');
+
+        $this->assertSame('about-previous', $page->fresh()->slug);
+        $this->assertSame(2, ContentRevision::where('model_type', 'page')->where('model_id', $page->id)->count());
+        $this->assertDatabaseHas('audit_logs', ['action' => 'page.restored', 'subject_id' => $page->id]);
+    }
+
+    public function test_last_active_manager_cannot_be_demoted(): void
+    {
+        $manager = User::create([
+            'name' => 'Only Manager', 'email' => 'only-manager@example.test', 'password' => 'A-long-safe-test-password',
+            'role' => 'manager', 'is_active' => true,
+        ]);
+
+        $this->actingAs($manager)->put(route('admin.users.update', ['user' => $manager->id]), [
+            'name' => $manager->name,
+            'email' => $manager->email,
+            'role' => 'editor',
+            'is_active' => '1',
+        ])->assertSessionHasErrors('role');
+
+        $this->assertDatabaseHas('users', ['id' => $manager->id, 'role' => 'manager', 'is_active' => true]);
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'user.updated', 'subject_id' => $manager->id]);
     }
 }

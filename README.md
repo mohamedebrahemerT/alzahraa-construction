@@ -69,3 +69,5 @@ MAIL_FROM_NAME="Al Zahraa Construction"
 ## الاستضافة
 
 اختر PHP 8.2 أو أحدث للويب وCLI، واضبط قاعدة MySQL وبيانات SMTP ومتغيرات `.env` على الخادم، ثم شغّل `php artisan migrate --force` وابنِ أصول الواجهة بـ`npm run build`. لا ترفع `.env` أو تضع أسرارًا في المستودع.
+
+راجع [DEPLOYMENT.md](DEPLOYMENT.md) لقائمة ما يجب اعتماده قبل الإطلاق وخطوات تجهيز الخادم والنشر والتحقق بعده.

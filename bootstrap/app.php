@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\EnsureActiveAdmin;
 use App\Http\Middleware\EnsureManager;
+use App\Http\Middleware\SecurityHeaders;
 use App\Http\Middleware\SetSiteLocale;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -19,7 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'active.admin' => EnsureActiveAdmin::class,
             'manager' => EnsureManager::class,
         ]);
-        $middleware->web(append: [SetSiteLocale::class]);
+        $middleware->web(append: [SetSiteLocale::class, SecurityHeaders::class]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
